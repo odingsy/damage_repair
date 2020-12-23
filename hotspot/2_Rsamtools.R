@@ -1,16 +1,24 @@
-
 library(Rsamtools)
 library(data.table)
 library("BSgenome.Hsapiens.UCSC.hg19")
+library('openxlsx')
+library(TxDb.Hsapiens.UCSC.hg19.knownGene)
+
 genome <- BSgenome.Hsapiens.UCSC.hg19
 
-library('openxlsx')
-sampinfo=read.xlsx('Early_Repair_samp.xlsx')
+norm_chr <- c(paste0("chr", 1:22), "chrX", "chrY")
+genes <- genes(TxDb.Hsapiens.UCSC.hg19.knownGene, filter = list(cds_chrom = norm_chr), single.strand.genes.only = FALSE)
+
+sampinfo=read.delim('fastq.list', header = TRUE, sep = '\t')
+i = 1
+
+
+
 
 for(i in 1:nrow(sampinfo)){
-  bamnamei=gsub('.fastq','',sampinfo$fastq_name[i])
-  cat(i,bamnamei,'\n\n')
-  bamPath=paste(bamnamei,'.cu.filtered.sorted.bam',sep='')
+  #bamnamei=gsub('.fastq','',sampinfo$fastq_name[i])
+  #cat(i,bamnamei,'\n\n')
+  bamPath= paste0('data/', 'SRR11510187', '.bam') #paste(bamnamei,'.cu.filtered.sorted.bam',sep='')
   bamFile=BamFile(bamPath)
   # high-level info
   seqinfo(bamFile)

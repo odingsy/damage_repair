@@ -1,0 +1,9 @@
+channels:
+    - conda-forge
+    - bioconda
+dependencies:
+    - sra-tools =2.10.9
+    - cutadapt =2.10
+    - bwa =0.7.17
+    - samtools =1.11
+    - picard =2.23.3

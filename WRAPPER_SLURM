@@ -1,0 +1,28 @@
+#!/bin/bash -l
+
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=20
+#SBATCH --mem=60G
+#SBATCH --time=06:00:00
+#SBATCH --mail-user=sguo039@ucr.edu
+#SBATCH --mail-type=ALL
+#SBATCH --job-name="damageRepair"
+#SBATCH -p intel,batch
+
+date
+
+module unload miniconda2 
+module load miniconda3
+
+conda create -n snakemake_damage
+
+conda activate snakemake_damage
+
+conda install --channel bioconda --channel conda-forge snakemake graphviz
+
+sleep 2
+
+snakemake --cores all --use-conda -- all
+
+date
