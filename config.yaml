@@ -1,4 +1,8 @@
 sample:
+    - SRR11510187
+    - SRR11510188
+    - SRR11510189
+    - SRR11510190
     - SRR3062627
     - SRR3062628
     - SRR3062629
@@ -22,4 +26,8 @@ sample:
     - SRR3062647
     - SRR3062648
 
-reference: ref/hg19.fasta 
+reference: ref_hg38/hg38.fna.gz 
+
+dir: data_hg38
+
+

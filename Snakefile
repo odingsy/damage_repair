@@ -1,17 +1,18 @@
 configfile: 'config.yaml'
 
+import os
 from re import escape
 wildcard_constraints:
     index = '|'.join([escape(x) for x in config['sample']])
 
 rule dl:
     output:
-        'data/{index}.fastq.gz'
+        os.path.join(config['dir'], '{index}.fastq.gz')
     conda: 
         'envs/1_alignment.yaml'
     shell:
         """
-        cd data
+        cd {config[dir]}
         fastq-dump --gzip {wildcards.index} 
         cd ..
         """
@@ -20,7 +21,7 @@ rule cut:
     input: 
         rules.dl.output
     output:
-        temp('data/{index}.cu.fastq')
+        temp(os.path.join(config['dir'], '{index}.cu.fastq.gz'))
     params:
         adaptor = 'TGGAATTCTCGGGTGCCAAGGAACTCCAGTNNNNNNACGATCTCGTATGCCGTCTTCTGCTTG'
     conda: 
@@ -34,10 +35,10 @@ rule align:
     input:
         rules.cut.output
     output:
-        temp('data/{index}.cu.filtered.bam')
+        temp(os.path.join(config['dir'], '{index}.cu.filtered.bam'))
     params:
         ref = config['reference'],
-        n = lambda wc: 'data/' + wc.index
+        n = lambda wc: os.path.join(config['dir'], wc.index)
     conda: 
         'envs/1_alignment.yaml'
     shell:
@@ -51,7 +52,7 @@ rule bamindex:
     input:
         rules.align.output
     output:
-        'data/{index}.bam'
+        os.path.join(config['dir'], '{index}.bam')
     conda: 
         'envs/1_alignment.yaml'
     shell:

@@ -1,49 +1,65 @@
-library(Rsamtools)
-library(data.table)
-library("BSgenome.Hsapiens.UCSC.hg19")
-library('openxlsx')
+library(tidyverse) 
+library(GenomicAlignments)
+library(BSgenome.Hsapiens.UCSC.hg19)
 library(TxDb.Hsapiens.UCSC.hg19.knownGene)
 
 genome <- BSgenome.Hsapiens.UCSC.hg19
 
-norm_chr <- c(paste0("chr", 1:22), "chrX", "chrY")
+norm_chr <- paste0("chr", c(1:22, "X", "Y"))
 genes <- genes(TxDb.Hsapiens.UCSC.hg19.knownGene, filter = list(cds_chrom = norm_chr), single.strand.genes.only = FALSE)
 
-sampinfo=read.delim('fastq.list', header = TRUE, sep = '\t')
-i = 1
-
-
-
-
-for(i in 1:nrow(sampinfo)){
-  #bamnamei=gsub('.fastq','',sampinfo$fastq_name[i])
-  #cat(i,bamnamei,'\n\n')
-  bamPath= paste0('data/', 'SRR11510187', '.bam') #paste(bamnamei,'.cu.filtered.sorted.bam',sep='')
-  bamFile=BamFile(bamPath)
-  # high-level info
-  seqinfo(bamFile)
-  what <- c("rname","pos","strand","mapq","qwidth")
-  flag <- scanBamFlag(isDuplicate = FALSE, isUnmappedQuery = FALSE, 
+# fastq total reads 
+fastq_count <- function(srr, prefix = 'data', suffix = '.fastq.gz'){
+    fastqPath <- file.path(prefix, paste0(srr, suffix))
+    # how to count Fastq: https://www.biostars.org/p/139006/#298653
+    system(paste('echo $(zcat', fastqPath, '| wc -l)/4 | bc', sep = ' '))
+}
+# unpacking bam to gr 
+srr = 'SRR3062627'
+prefix = 'data'
+suffix = '.fastq.gz'
+bam2gr <- function(srr, prefix = 'data', suffix = '.bam'){
+    bamPath <- file.path(prefix, paste0(srr, suffix))
+    bamFile <- BamFile(bamPath)
+    
+	what <- c("rname","pos","strand","mapq","qwidth")
+    flag <- scanBamFlag(isDuplicate = FALSE, isUnmappedQuery = FALSE, 
                       isNotPassingQualityControls = FALSE)
-  param <- ScanBamParam(what = what, flag = flag)
-  aln <- scanBam(bamFile, param=param)
-  aln=aln[[1]]
-  qwidth=aln$qwidth
+    
+	param <- ScanBamParam(what = what, flag = flag)
+    aln <- scanBam(bamFile, param=param)[[1]] 
+	GRanges(seqnames=Rle(aln$rname),
+			ranges=IRanges(start=aln$pos,end=aln$pos+aln$qwidth-1),
+            strand=Rle(aln$strand),
+            mapq = aln$mapq,
+            qwidth=aln$qwidth)    
+    #aln <- readGAlignments(bamFile, param = param) 
+	#GRanges(seqnames= seqnames(aln),
+	#		ranges = IRanges(start = start(aln), end = end(aln)),
+    #        strand = strand(aln),
+    #        mapq = mcols(aln)$mapq,
+    #        qwidth = qwidth(aln))
+}
+
+sampinfo <- read_delim('fastq.list', delim = '\t') %>%
+	mutate(grl = map(fastq_name, ~{bam2gr(srr = .x)})) 
+sampinfo <- sampinfo %>%
+    mutate(fastq_reads = map_dbl(fastq_name, ~{fastq_count(srr = .x)}), 
+           total_mapped = map_dbl(grl, ~{length(.x)}), 
+           grl = map(grl, ~{unique(.x)}), 
+           dedup = map_dbl(grl, ~{length(.x)}),
+           grl = map(grl, ~{.x[.x$mapq >= 20]}),
+           mapq = map_dbl(grl, ~{length(.x)}),
+           grl = map(grl, ~{.x[seqnames(.x) %in% norm_chr]}),
+           chr = map_dbl(grl, ~{length(.x)}),
+           grl = map(grl, ~{.x[.x$qwidth >= 21 & .x$qwidth <= 31]}),
+           qwidth = map_dbl(grl, ~{length(.x)}))
+
+
   
-  reads=c()
-  gr = GRanges(seqnames=Rle(aln$rname),
-               ranges=IRanges(start=aln$pos,end=aln$pos+aln$qwidth-1),
-               strand=Rle(aln$strand),
-               mapq = aln$mapq,
-               qwidth=aln$qwidth)
-  reads=c(reads,total_mapped=length(gr))
-  
-  gr=unique(gr)
-  reads=c(reads,dedup=length(gr))
-  
-  pdf(file=paste('XR_',sampinfo$time[i],'_',sampinfo$replicate[i],'_readlength_hist.pdf',sep=''), width=4, height=3)
-  hist(width(gr),breaks=5:50,xlab='Read length', main=paste('XR_',sampinfo$time[i],'_',sampinfo$replicate[i]),xlim=c(10,40))
-  dev.off()
+pdf(file=paste('XR_',sampinfo$time[i],'_',sampinfo$replicate[i],'_readlength_hist.pdf',sep=''), width=4, height=3)
+hist(width(gr),breaks=5:50,xlab='Read length', main=paste('XR_',sampinfo$time[i],'_',sampinfo$replicate[i]),xlim=c(10,40))
+dev.off()
   
   gr = gr[gr$mapq>=20] 
   reads=c(reads,mapq=length(gr))
@@ -131,6 +147,10 @@ for(i in 1:nrow(sampinfo)){
   
   save(gr, file=paste('XR_',sampinfo$time[i],'_',sampinfo$replicate[i],'_gr_qc.rda',sep=''))
 
+  
+  gr[countOverlaps(gr, unlist(genes)) > 0 ]
+  
+  
   
   # gene body from hg19: only look at reads within gene bodies
   hg19=read.csv('gene.info.csv')
