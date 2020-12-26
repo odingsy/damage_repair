@@ -1,8 +1,8 @@
 #!/bin/bash -l
 
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=20
+#SBATCH --nodes=2
+#SBATCH --ntasks=2
+#SBATCH --cpus-per-task=30
 #SBATCH --mem=60G
 #SBATCH --time=06:00:00
 #SBATCH --mail-user=sguo039@ucr.edu

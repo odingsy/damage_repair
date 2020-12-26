@@ -1,23 +1,23 @@
 library(tidyverse) 
+library(furrr) 
 library(GenomicAlignments)
 library(BSgenome.Hsapiens.UCSC.hg19)
 library(TxDb.Hsapiens.UCSC.hg19.knownGene)
 
-genome <- BSgenome.Hsapiens.UCSC.hg19
+# config furrr to allow 
+future::plan(sequential) 
 
+genome <- BSgenome.Hsapiens.UCSC.hg19
 norm_chr <- paste0("chr", c(1:22, "X", "Y"))
-genes <- genes(TxDb.Hsapiens.UCSC.hg19.knownGene, filter = list(cds_chrom = norm_chr), single.strand.genes.only = FALSE)
+genes <- genes(TxDb.Hsapiens.UCSC.hg19.knownGene, filter = list(cds_chrom = norm_chr), single.strand.genes.only = FALSE) %>% unlist()
 
 # fastq total reads 
 fastq_count <- function(srr, prefix = 'data', suffix = '.fastq.gz'){
     fastqPath <- file.path(prefix, paste0(srr, suffix))
     # how to count Fastq: https://www.biostars.org/p/139006/#298653
-    system(paste('echo $(zcat', fastqPath, '| wc -l)/4 | bc', sep = ' '))
+    system(paste('echo $(zcat', fastqPath, '| wc -l)/4 | bc', sep = ' '), intern = TRUE)
 }
-# unpacking bam to gr 
-srr = 'SRR3062627'
-prefix = 'data'
-suffix = '.fastq.gz'
+# unpacking bam to gr
 bam2gr <- function(srr, prefix = 'data', suffix = '.bam'){
     bamPath <- file.path(prefix, paste0(srr, suffix))
     bamFile <- BamFile(bamPath)
@@ -41,41 +41,71 @@ bam2gr <- function(srr, prefix = 'data', suffix = '.bam'){
     #        qwidth = qwidth(aln))
 }
 
-sampinfo <- read_delim('fastq.list', delim = '\t') %>%
-	mutate(grl = map(fastq_name, ~{bam2gr(srr = .x)})) 
-sampinfo <- sampinfo %>%
-    mutate(fastq_reads = map_dbl(fastq_name, ~{fastq_count(srr = .x)}), 
-           total_mapped = map_dbl(grl, ~{length(.x)}), 
-           grl = map(grl, ~{unique(.x)}), 
-           dedup = map_dbl(grl, ~{length(.x)}),
-           grl = map(grl, ~{.x[.x$mapq >= 20]}),
-           mapq = map_dbl(grl, ~{length(.x)}),
-           grl = map(grl, ~{.x[seqnames(.x) %in% norm_chr]}),
-           chr = map_dbl(grl, ~{length(.x)}),
-           grl = map(grl, ~{.x[.x$qwidth >= 21 & .x$qwidth <= 31]}),
-           qwidth = map_dbl(grl, ~{length(.x)}))
+# read-in bam
+sampinfo <- read_delim('fastq.list', delim = '\t', col_type = "ccccc") %>%
+    filter(gsm %in% c('GSM4459995')) %>%
+	mutate(grl = future_map(fastq_name, ~{bam2gr(srr = .x)})) %>%
+    mutate(total_mapped = future_map_dbl(grl, ~{length(.x)}))
+# summarise raw fastq and bam
+stbl <- sampinfo %>%
+    mutate(fastq_reads = future_map_dbl(fastq_name, ~{fastq_count(srr = .x) %>% as.numeric()}))
+
+# filter bam
+stbl <- stbl %>%
+    mutate(grl = future_map(grl, ~{unique(.x)})) %>%
+    mutate(dedup = future_map_dbl(grl, ~{length(.x)})) %>% 
+    mutate(grl = future_map(grl, ~{.x[.x$mapq >= 20]})) %>%
+    mutate(mapq = future_map_dbl(grl, ~{length(.x)})) %>%
+    mutate(grl = future_map(grl, ~{.x[seqnames(.x) %in% norm_chr] %>% keepSeqlevels(., norm_chr)})) %>%
+    mutate(chr = future_map_dbl(grl, ~{length(.x)})) %>%
+    mutate(grl = future_map(grl, ~{.x[.x$qwidth >= 21 & .x$qwidth <= 31]})) %>%
+    mutate(qwidth = future_map_dbl(grl, ~{length(.x)}))
+
+# summarise bam within gene body 
+stbl_genebody <- stbl %>%
+    mutate(grl = future_map(grl, ~{.x[countOverlaps(.x, genes) > 0 ]}),
+           genebody = future_map_dbl(grl, ~{length(.x)}))
+write_delim(stbl_genebody %>% dplyr::select(-grl), 'results/sample_summary.tab')
+
+# reads length distribution
+stbl %>%
+    mutate(width = future_map(grl, ~{width(.x)})) %>%
+    dplyr::select(fastq_name, width) %>%
+    unnest(width) %>%
+    ggplot(aes(width)) + 
+    geom_histogram(binwidth = 1)+
+    facet_grid(.~ fastq_name)
+
+# sequence logo 
+qwidthi=26
+strd = c('+', '-')
+  
+di_freq <- function(gr, genome = genome, qwidthi = qwidthi){
+    dimat <- matrix(ncol = qwidthi-1, nrow = 16)
+    acgt <- c('A', 'C', 'G', 'T')    
+    
+    rownames(dimat) <- apply(expand.grid(acgt, acgt), 1, paste, collapse = '') %>% sort()
+    numCores <- detectCores()
+    dimat <- mclapply(1:(qwidthi-1), mc.cores = numCores, function(t) {
+        dirange <- GRanges(seqnames = seqnames(gr), 
+                           ranges = IRanges(start = start(gr)+t-1, end = start(gr)+t),
+                           strand = strand(gr))
+        apply(dinucleotideFrequency(Views(genome, dirange)),2,sum)
+    })
+    return(dimat)
+}
 
 
-  
-pdf(file=paste('XR_',sampinfo$time[i],'_',sampinfo$replicate[i],'_readlength_hist.pdf',sep=''), width=4, height=3)
-hist(width(gr),breaks=5:50,xlab='Read length', main=paste('XR_',sampinfo$time[i],'_',sampinfo$replicate[i]),xlim=c(10,40))
-dev.off()
-  
-  gr = gr[gr$mapq>=20] 
-  reads=c(reads,mapq=length(gr))
-  
-  table(gr@seqnames)
-  gr = gr[!is.na(match(gr@seqnames,paste('chr',c(1:22,'X','Y'), sep='')))] # only look at chr1-22, X, Y
-  gr = keepSeqlevels(gr, paste('chr',c(1:22,'X','Y'), sep=''))
-  
-  reads=c(reads,chr=length(gr))
-  
-  # only keep reads with length 21 to 31
-  # hist(gr$qwidth,100)
-  gr=gr[gr$qwidth >=21 & gr$qwidth <=31]
-  reads=c(reads,qwidth=length(gr))
-  
-  # plot nucleotide frequency
+mat <- stbl %>%
+    mutate(grl = future_map(grl, ~{.x[.x$qwidth == qwidthi & strand(.x) %in% strd]}),
+           n_freq = future_map(grl, ~{consensusMatrix(Views(genome, .x))[1:4, ]}),
+           di_freq = future_map(grl, ~{di_freq(gr = .x)}))
+
+
+
+
+
+# plot nucleotide frequency
   gr.plus=gr[gr@strand=='+']
   gr.plus=unique(gr.plus)
   
@@ -90,13 +120,6 @@ dev.off()
   if(length(gr.chr)>0){
     seqs <- Views(genome.chr, gr.chr@ranges)  
     cM=cM+consensusMatrix(seqs)[c('A','C','G','T'),]
-  }
-  diM=matrix(ncol=qwidthi-1, nrow=16)
-  rownames(diM)=c('AA', 'AC', 'AG', 'AT', 'CA', 'CC', 'CG', 'CT', 'GA', 'GC', 'GG', 'GT', 'TA', 'TC', 'TG', 'TT' )
-  
-  for(t in 1:ncol(diM)){
-    seqs.t <- apply(dinucleotideFrequency(Views(genome.chr,IRanges(start=start(gr.chr@ranges)+t-1,end=start(gr.chr@ranges)+t))),2,sum)
-    diM[,t]=seqs.t
   }
   
   
@@ -148,7 +171,6 @@ dev.off()
   save(gr, file=paste('XR_',sampinfo$time[i],'_',sampinfo$replicate[i],'_gr_qc.rda',sep=''))
 
   
-  gr[countOverlaps(gr, unlist(genes)) > 0 ]
   
   
   
