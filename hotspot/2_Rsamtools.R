@@ -5,13 +5,14 @@ library("BSgenome.Hsapiens.UCSC.hg19")
 genome <- BSgenome.Hsapiens.UCSC.hg19
 
 library('openxlsx')
-sampinfo=read.xlsx('Early_Repair_samp.xlsx')
-
+# sampinfo=read.xlsx('Early_Repair_samp.xlsx')
+sampinfo = read.delim('fastq.list', sep = '\t')
+i = 8 # SRR3062630
 for(i in 1:nrow(sampinfo)){
-  bamnamei=gsub('.fastq','',sampinfo$fastq_name[i])
-  cat(i,bamnamei,'\n\n')
-  bamPath=paste(bamnamei,'.cu.filtered.sorted.bam',sep='')
-  bamFile=BamFile(bamPath)
+  #bamnamei=gsub('.fastq','',sampinfo$fastq_name[i])
+  #cat(i,bamnamei,'\n\n')
+  #bamPath=paste(bamnamei,'.cu.filtered.sorted.bam',sep='')
+  bamFile=BamFile('data/SRR3062630.bam')
   # high-level info
   seqinfo(bamFile)
   what <- c("rname","pos","strand","mapq","qwidth")
@@ -125,26 +126,30 @@ for(i in 1:nrow(sampinfo)){
 
   
   # gene body from hg19: only look at reads within gene bodies
-  hg19=read.csv('gene.info.csv')
-  chr=1
-  hg19.chr=hg19[hg19$chromosome_name==chr,]
-  hg19.chr=IRanges(start=hg19.chr$start_position,end=hg19.chr$end_position)
-  gr.chr=gr[gr@seqnames==paste('chr',chr,sep='')]
+  library(TxDb.Hsapiens.UCSC.hg19.knownGene)
+  library(tidyverse)
+  norm_chr <- paste0("chr", c(1:22, "X", "Y"))
+  hg19 <- GenomicFeatures::genes(TxDb.Hsapiens.UCSC.hg19.knownGene, filter = list(tx_chrom = norm_chr), single.strand.genes.only = FALSE) %>% unlist()
+  #hg19=read.csv('gene.info.csv')
+  gr.gene = gr[countOverlaps(gr, hg19) > 0]
   
-  gene.filter=countOverlaps(gr.chr@ranges,hg19.chr)>0
-  gr.chr=gr.chr[gene.filter]
-  gr.gene=gr.chr
+  #hg19.chr=IRanges(start=hg19.chr$start_position,end=hg19.chr$end_position)
+  #gr.chr=gr[gr@seqnames=='chr1']
   
-  for(chr in c(2:22,'X','Y')){
-    cat(chr,'\t')
-    hg19.chr=hg19[hg19$chromosome_name==chr,]
-    hg19.chr=IRanges(start=hg19.chr$start_position,end=hg19.chr$end_position)
-    gr.chr=gr[gr@seqnames==paste('chr',chr,sep='')]
+  #gene.filter=countOverlaps(gr.chr@ranges,hg19.chr)>0
+  #gr.chr=gr.chr[gene.filter]
+  #gr.gene=gr.chr
+  
+  #for(chr in c(2:22,'X','Y')){
+  #  cat(chr,'\t')
+  #  hg19.chr=hg19[hg19$chromosome_name==chr,]
+  #  hg19.chr=IRanges(start=hg19.chr$start_position,end=hg19.chr$end_position)
+  #  gr.chr=gr[gr@seqnames==paste('chr',chr,sep='')]
     
-    gene.filter=countOverlaps(gr.chr@ranges,hg19.chr)>0
-    gr.chr=gr.chr[gene.filter]
-    gr.gene=c(gr.gene,gr.chr)
-  }
+  #  gene.filter=countOverlaps(gr.chr@ranges,hg19.chr)>0
+  #  gr.chr=gr.chr[gene.filter]
+  #  gr.gene=c(gr.gene,gr.chr)
+  #}
   
   gr=gr.gene
   
@@ -154,36 +159,36 @@ for(i in 1:nrow(sampinfo)){
   
   
   # getting reads
-  chr=1
-  hg19.chr=hg19[hg19$chromosome_name==chr,]
-  hg19.ref.chr=IRanges(start=hg19.chr$start_position,end=hg19.chr$end_position)
-  gr.chr=gr[gr@seqnames==paste('chr',chr,sep='')]
+  #chr=1
+  #hg19.chr=hg19[seqnames(hg19)=='chr1']
+  #hg19.ref.chr= ranges(hg19.chr) #IRanges(start=hg19.chr$start_position,end=hg19.chr$end_position)
+  #gr.chr=gr[gr@seqnames=='chr1']
   
-  hg19.output=hg19.chr
+  #hg19.output=hg19.chr
   
-  plus.strand=countOverlaps(hg19.ref.chr,gr.chr[gr.chr@strand=='+']@ranges)
-  minus.strand=countOverlaps(hg19.ref.chr,gr.chr[gr.chr@strand=='-']@ranges)
+  plus.strand=countOverlaps(hg19, gr[strand(gr) == '+'])
+  minus.strand=countOverlaps(hg19, gr[strand(gr) == '-'])
+  # minus.strand=countOverlaps(hg19.ref.chr,gr.chr[gr.chr@strand=='-']@ranges)
   
   
-  for(chr in c(2:22,'X','Y')){
-    cat(chr,'\t')
-    hg19.chr=hg19[hg19$chromosome_name==chr,]
-    hg19.ref.chr=IRanges(start=hg19.chr$start_position,end=hg19.chr$end_position)
-    gr.chr=gr[gr@seqnames==paste('chr',chr,sep='')]
+  #for(chr in c(2:22,'X','Y')){
+    #cat(chr,'\t')
+    #hg19.chr=hg19[hg19$chromosome_name==chr,]
+    #hg19.ref.chr=IRanges(start=hg19.chr$start_position,end=hg19.chr$end_position)
+    #gr.chr=gr[gr@seqnames==paste('chr',chr,sep='')]
     
-    hg19.output=rbind(hg19.output,hg19.chr)
+    #hg19.output=rbind(hg19.output,hg19.chr)
     
-    plus.strand=c(plus.strand,countOverlaps(hg19.ref.chr,gr.chr[gr.chr@strand=='+']@ranges))
-    minus.strand=c(minus.strand,countOverlaps(hg19.ref.chr,gr.chr[gr.chr@strand=='-']@ranges))
-    
-  }
+    #plus.strand=c(plus.strand,countOverlaps(hg19.ref.chr,gr.chr[gr.chr@strand=='+']@ranges))
+    #minus.strand=c(minus.strand,countOverlaps(hg19.ref.chr,gr.chr[gr.chr@strand=='-']@ranges))  
+  #}
   
-  dim(hg19.output)
+  #dim(hg19.output)
   plus.strand=as.matrix(plus.strand)
   minus.strand=as.matrix(minus.strand)
   plot(plus.strand, minus.strand)
-  rownames(plus.strand)=hg19.output$Geneid
-  rownames(minus.strand)=hg19.output$Geneid
+  #rownames(plus.strand)=hg19.output$Geneid
+  #rownames(minus.strand)=hg19.output$Geneid
   
   write.table(plus.strand, file=paste('XR_',sampinfo$time[i],'_',sampinfo$replicate[i],'_XRseq_gene_plus.txt',sep=''),col.names = F, row.names = T, sep='\t', quote = F)
   write.table(minus.strand, file=paste('XR_',sampinfo$time[i],'_',sampinfo$replicate[i],'_XRseq_gene_minus.txt',sep=''),col.names = F, row.names = T, sep='\t', quote = F)
@@ -197,16 +202,17 @@ library("BSgenome.Hsapiens.UCSC.hg19")
 genome <- BSgenome.Hsapiens.UCSC.hg19
 
 library('openxlsx')
-sampinfo=read.xlsx('Early_Repair_samp.xlsx')
-i=1
-load(paste('XR_',sampinfo$time[i],'_',sampinfo$replicate[i],'_reads.rda',sep=''))
+#sampinfo=read.xlsx('Early_Repair_samp.xlsx')
+sampinfo=cbind(sampinfo, reads.all)
+i=8
+#load(paste('XR_',sampinfo$time[i],'_',sampinfo$replicate[i],'_reads.rda',sep=''))
 reads.all=matrix(ncol=length(reads), nrow=nrow(sampinfo))
 colnames(reads.all)=names(reads)
 
-for(i in 1:nrow(sampinfo)){
+#for(i in 1:nrow(sampinfo)){
   load(paste('XR_',sampinfo$time[i],'_',sampinfo$replicate[i],'_reads.rda',sep=''))
   reads.all[i,]=reads
-}
+#}
 sampinfo=cbind(sampinfo, reads.all)
 save(sampinfo,file='sampinfo.rda')
 write.csv(sampinfo, file='sampinfo.csv', row.names = F)
