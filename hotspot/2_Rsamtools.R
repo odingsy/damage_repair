@@ -1,13 +1,10 @@
 library(tidyverse) 
-library(furrr) 
 library(GenomicAlignments)
 library(BSgenome.Hsapiens.UCSC.hg19)
 library(TxDb.Hsapiens.UCSC.hg19.knownGene)
 
-# config furrr to allow 
-future::plan(sequential) 
-
 genome <- BSgenome.Hsapiens.UCSC.hg19
+
 norm_chr <- paste0("chr", c(1:22, "X", "Y"))
 genes <- genes(TxDb.Hsapiens.UCSC.hg19.knownGene, filter = list(cds_chrom = norm_chr), single.strand.genes.only = FALSE) %>% unlist()
 
@@ -44,32 +41,33 @@ bam2gr <- function(srr, prefix = 'data', suffix = '.bam'){
 # read-in bam
 sampinfo <- read_delim('fastq.list', delim = '\t', col_type = "ccccc") %>%
     filter(gsm %in% c('GSM4459995')) %>%
-	mutate(grl = future_map(fastq_name, ~{bam2gr(srr = .x)})) %>%
-    mutate(total_mapped = future_map_dbl(grl, ~{length(.x)}))
+	mutate(grl = map(fastq_name, ~{bam2gr(srr = .x)}))
+
 # summarise raw fastq and bam
 stbl <- sampinfo %>%
-    mutate(fastq_reads = future_map_dbl(fastq_name, ~{fastq_count(srr = .x) %>% as.numeric()}))
+    mutate(fastq_reads = map_dbl(fastq_name, ~{fastq_count(srr = .x) %>% as.numeric()}))
+stbl <- stbl %>% 
+    mutate(total_mapped = map_dbl(grl, ~{length(.x)}))
 
 # filter bam
 stbl <- stbl %>%
-    mutate(grl = future_map(grl, ~{unique(.x)})) %>%
-    mutate(dedup = future_map_dbl(grl, ~{length(.x)})) %>% 
-    mutate(grl = future_map(grl, ~{.x[.x$mapq >= 20]})) %>%
-    mutate(mapq = future_map_dbl(grl, ~{length(.x)})) %>%
-    mutate(grl = future_map(grl, ~{.x[seqnames(.x) %in% norm_chr] %>% keepSeqlevels(., norm_chr)})) %>%
-    mutate(chr = future_map_dbl(grl, ~{length(.x)})) %>%
-    mutate(grl = future_map(grl, ~{.x[.x$qwidth >= 21 & .x$qwidth <= 31]})) %>%
-    mutate(qwidth = future_map_dbl(grl, ~{length(.x)}))
+    mutate(grl = map(grl, ~{unique(.x)}), 
+           dedup = map_dbl(grl, ~{length(.x)})) %>% 
+    mutate(grl = map(grl, ~{.x[.x$mapq >= 20]}),
+           mapq = map_dbl(grl, ~{length(.x)})) %>%
+    mutate(grl = map(grl, ~{.x[seqnames(.x) %in% norm_chr] %>% keepSeqlevels(., norm_chr)}),
+           chr = map_dbl(grl, ~{length(.x)})) %>%
+    mutate(grl = map(grl, ~{.x[.x$qwidth >= 21 & .x$qwidth <= 31]}),
+           qwidth = map_dbl(grl, ~{length(.x)})) %>%
+    mutate(grl_genebody = map(grl, ~{.x[countOverlaps(.x, genes) > 0 ]}),
+           genebody = map_dbl(grl, ~{length(.x)})) %>%
+    dplyr::select(-grl_genebody)
 
-# summarise bam within gene body 
-stbl_genebody <- stbl %>%
-    mutate(grl = future_map(grl, ~{.x[countOverlaps(.x, genes) > 0 ]}),
-           genebody = future_map_dbl(grl, ~{length(.x)}))
-write_delim(stbl_genebody %>% dplyr::select(-grl), 'results/sample_summary.tab')
+
 
 # reads length distribution
 stbl %>%
-    mutate(width = future_map(grl, ~{width(.x)})) %>%
+    mutate(width = map(grl, ~{width(.x)})) %>%
     dplyr::select(fastq_name, width) %>%
     unnest(width) %>%
     ggplot(aes(width)) + 
@@ -81,10 +79,9 @@ qwidthi=26
 strd = c('+', '-')
   
 di_freq <- function(gr, genome = genome, qwidthi = qwidthi){
-    dimat <- matrix(ncol = qwidthi-1, nrow = 16)
-    acgt <- c('A', 'C', 'G', 'T')    
-    
-    rownames(dimat) <- apply(expand.grid(acgt, acgt), 1, paste, collapse = '') %>% sort()
+    #dimat <- matrix(ncol = qwidthi-1, nrow = 16)
+    #acgt <- c('A', 'C', 'G', 'T')    
+    #rownames(dimat) <- apply(expand.grid(acgt, acgt), 1, paste, collapse = '') %>% sort()
     numCores <- detectCores()
     dimat <- mclapply(1:(qwidthi-1), mc.cores = numCores, function(t) {
         dirange <- GRanges(seqnames = seqnames(gr), 
@@ -97,9 +94,11 @@ di_freq <- function(gr, genome = genome, qwidthi = qwidthi){
 
 
 mat <- stbl %>%
-    mutate(grl = future_map(grl, ~{.x[.x$qwidth == qwidthi & strand(.x) %in% strd]}),
-           n_freq = future_map(grl, ~{consensusMatrix(Views(genome, .x))[1:4, ]}),
-           di_freq = future_map(grl, ~{di_freq(gr = .x)}))
+    mutate(grl = map(grl, ~{.x[.x$qwidth == qwidthi & strand(.x) %in% strd]}),
+           n_freq = map(grl, ~{consensusMatrix(Views(genome, .x))[1:4, ]}))
+           
+           ,
+           di_freq = map(grl, ~{di_freq(gr = .x)}))
 
 
 
